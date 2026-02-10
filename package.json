@@ -1,0 +1,21 @@
+{
+	"name": "webpack-import-splitter-loader",
+	"version": "1.0.0",
+	"license": "Copyright Elijah Black",
+	"private": false,
+	"type": "module",
+	"sideEffects": false,
+	"main": "./splitter-loader.js",
+	"exports": {
+		".": "./splitter-loader.js",
+		"./splitter-loader-inner.js": "./splitter-loader-inner.js"
+	},
+	"dependencies": {
+		"acorn": "*",
+		"astring": "*"
+	},
+	"peerDependencies": {
+		"webpack": "^5.105.0"
+	},
+	"packageManager": "yarn@4.12.0"
+}

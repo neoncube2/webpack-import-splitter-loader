@@ -46,22 +46,7 @@ function generateCode(contents) {
 
 export async function getNormalizedImportFilepath(importFilepath, context, loader) {
     const resolve = loader.getResolve({
-        dependencyType: 'esm',
-        // target: 'web'
-        // byDependency: {
-        //     // ...
-        //     esm: {
-        //         mainFields: ['browser', 'module'],
-        //     },
-        //     commonjs: {
-        //         aliasFields: ['browser'],
-        //     },
-        //     url: {
-        //         preferRelative: true,
-        //     },
-        // },
-        // For @emotion/cache, etc.
-        // aliasFields: ['browser']
+        dependencyType: 'esm'
     });
 
     try {
@@ -78,23 +63,29 @@ function getVirtualModulePlugin(loader) {
     const plugins = loader._compiler.options.plugins;
 
     // for (let plugin of plugins) {
-    //     // if (plugin instanceof webpack.experiments.schemes.VirtualUrlPlugin)
+    //     if (plugin.scheme !== 'webpack-import-splitter-loader')
+    //         continue;
+
     //     console.log(plugin);
-    //     console.log(plugin.toString());
-    //     console.log(Object.prototype.toString.call(plugin));
     // }
 
-    // const virtualModulePlugin = plugins.find(plugin => plugin instanceof VirtualUrlPlugin/* webpack.experiments.schemes.VirtualUrlPlugin*//* && plugin.scheme === 'splitter-loader'*/);
+    // const virtualModulePlugin = plugins.find(plugin => plugin instanceof webpack.experiments.schemes.VirtualUrlPlugin);
 
-    const virtualModulePlugin = plugins.find(plugin => plugin.scheme === 'virtual'/* instanceof webpack.experiments.schemes.VirtualUrlPlugin*//* && plugin.scheme === 'splitter-loader'*/);
+    const virtualModulePlugin = plugins.find(plugin => plugin.scheme === 'webpack-import-splitter-loader'/* && plugin instanceof webpack.experiments.schemes.VirtualUrlPlugin*/);
 
     if (virtualModulePlugin == null)
         throw `Critical error: No VirtualUrlPlugin registered`;
 
     return virtualModulePlugin;
 
-    // TODO: Might be smart to ue a different scheme and to check for that one
-    // const newVirtualModulePlugin = new /*webpack.experiments.schemes.*/VirtualUrlPlugin({}/*, 'splitter-loader'*/);
+    // console.log('Making new virtual URL plugin');
+
+    // const newVirtualModulePlugin = new webpack.experiments.schemes.VirtualUrlPlugin(
+    //     {
+    //         '__unused__': ''
+    //     },
+    //     'webpack-import-splitter-loader'
+    // );
 
     // plugins.push(newVirtualModulePlugin);
 
@@ -109,17 +100,13 @@ async function makeImportSource(importPath, functionName, context, loader, mustF
 
     const virtualModulePlugin = getVirtualModulePlugin(loader);
 
-    const virtualModuleName = 'virtual:' + functionName + '--' + importFilepath/*.replaceAll(':', '_').replaceAll('/', '_')*/  /*.replaceAll('.', '_')*/;
+    const virtualModuleName = 'webpack-import-splitter-loader:' + functionName + '--' + importFilepath;
 
     if (virtualModulePlugin.modules[virtualModuleName] == null) {
-        // console.log('Creating virtual plugin for ' + virtualModuleName + ' (' + importFilepath + ')');
-
-        // Why does, when VirtualPlugin is defined in webpack-common, it finds the file, but otherwise doesn't? 
-        const fileContents = await readFile(importFilepath/*, 'utf8'*/);
-
+        const readFileContentsTask = readFile(importFilepath/*, 'utf8'*/);
         virtualModulePlugin.modules[virtualModuleName] = {
             type: path.extname(importFilepath),
-            source: async (loaderContext) => fileContents
+            source: async (loaderContext) => await readFileContentsTask
         };
     }
 
@@ -131,9 +118,6 @@ async function makeImportSource(importPath, functionName, context, loader, mustF
     });
 
     return 'webpack-import-splitter-loader/splitter-loader-inner.js?' + loaderOptions + '!' + virtualModuleName;
-
-    // Why does, when VirtualPlugin is defined in webpack-common, it finds the file, but otherwise doesn't? 
-    // return makeVirtualLoader(normalizedImportFilepath, fileContents, functionName, loader, mustFindImport);
 }
 
 function getImportName(importSpecifier) {
@@ -183,16 +167,13 @@ async function getNewImportDeclarations(importDeclaration, importPath, context, 
 
 export async function isESMModule(importPath, loader) {
     // TODO: Hardcoded
-    if (importPath[0] === '.' || importPath.startsWith('C:'))
+    if (importPath[0] === '.' || importPath.startsWith('C:')/* || importPath.startsWith('/')*/)
         return true;
 
     try {
         const moduleResult = await loader.importModule(importPath);
 
         return moduleResult.toString() === '[object Module]' || moduleResult.toString() === '[object NormalModule]';
-
-        if ((moduleResult.toString() === '[object Module]' || moduleResult.toString() === '[object NormalModule]') && !(moduleResult instanceof webpack.Module || moduleResult instanceof webpack.NormalModule))
-            console.log('Different module results for ' + importPath);
 
         // return (moduleResult instanceof webpack.Module || moduleResult instanceof webpack.NormalModule);
     } catch (e) {
@@ -368,7 +349,7 @@ function makeNewCode(newBody, parsedImportText) {
         body: newBody
     });
 
-    console.log(newCode);
+    // console.log(newCode);
 
     return newCode;
 }
@@ -402,13 +383,6 @@ export async function getSplitterLoader(loader, context) {
 
 export async function processContent(content, exportName, importFilepath, context, loader, mustFindImport) {
     const parsedImportText = parse(content);
-
-    // if (exportName === 'AppWithCookies') {
-    //     console.log(parsedImportText);
-    //     console.log(JSON.stringify(parsedImportText, null, 2));
-
-    //     asdf
-    // }
 
     try {
         const beforeImports = [];
@@ -464,7 +438,8 @@ export async function processContent(content, exportName, importFilepath, contex
                             break;
 
                         default:
-                            console.log(statement);
+                            console.error(statement);
+
                             throw `Unrecognized variable declaration "${statement.kind}"`;
                     }
                     break;

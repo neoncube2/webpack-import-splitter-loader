@@ -12,7 +12,8 @@
 	},
 	"dependencies": {
 		"acorn": "*",
-		"astring": "*"
+		"astring": "*",
+		"md5": "*"
 	},
 	"peerDependencies": {
 		"webpack": "^5.105.0"

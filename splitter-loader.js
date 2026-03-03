@@ -28,13 +28,13 @@ export default async function asyncLoader(content, map, meta) {
     if (!await isEntry(loader, importFilepath))
         return content;
 
-    console.log('In splitter loader, exporting ' + exportName + ' from ' + importFilepath + ' with context ' + context);
+    // console.log('In splitter loader, exporting ' + exportName + ' from ' + importFilepath + ' with context ' + context);
 
     const processedContent = await processContent(content, exportName, importFilepath, context, loader, mustFindImport)
 
-    console.log('Result of exporting ' + exportName + ' from ' + importFilepath + ' with context ' + context + ':');
+    // console.log('Result of exporting ' + exportName + ' from ' + importFilepath + ' with context ' + context + ':');
 
-    console.log(processedContent);
+    // console.log(processedContent);
 
     return processedContent;
 }

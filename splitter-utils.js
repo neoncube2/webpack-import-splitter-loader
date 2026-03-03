@@ -4,6 +4,7 @@ import webpack from 'webpack';
 // VSCode shows Node as not being used, but it's used in the instanceof calls in visitAllNodes()
 import { Parser, Node } from 'acorn';
 import { generate } from 'astring';
+import md5 from 'md5';
 
 function shouldExport(identifier, exportName) {
     return identifier === exportName || exportName === '*';
@@ -98,14 +99,23 @@ async function makeImportSource(importPath, functionName, context, loader, mustF
 
     const importFilepath = await getNormalizedImportFilepath(importPath, context, loader);
 
+    const extensionName = path.extname(importFilepath);
+
+    // TODO: Hardcoded. Should be able to remove after https://github.com/webpack/webpack/issues/20421 is implemented
+    if (!/\.(js|jsx|mjs)$/.test(extensionName))
+        return importFilepath;
+
     const virtualModulePlugin = getVirtualModulePlugin(loader);
 
-    const virtualModuleName = 'webpack-import-splitter-loader:' + functionName + '--' + importFilepath;
+    // We add the MD5 hash after the function name to avoid the Webpack warning "There are multiple modules with names that only differ in casing."
+    // Since we're using virtual modules, this warning doesn't apply to us, and this warning shows up often, because minified modules often
+    // export single-letter variables that differ only in case (e.g. "H" and "h")
+    const virtualModuleName = 'webpack-import-splitter-loader:' + functionName + '--' + md5(functionName) + importFilepath;
 
     if (virtualModulePlugin.modules[virtualModuleName] == null) {
         const readFileContentsTask = readFile(importFilepath/*, 'utf8'*/);
         virtualModulePlugin.modules[virtualModuleName] = {
-            type: path.extname(importFilepath),
+            type: extensionName,
             source: async (loaderContext) => await readFileContentsTask
         };
     }
@@ -312,7 +322,7 @@ async function getPossiblyNeededImportStatements(imports, statements, context, l
             const source = importExpression.source;
 
             if (excludedImports.has(source.value)) {
-                console.log('Excluding ' + source.value);
+                // console.log('Excluding ' + source.value);
 
                 continue;
             }

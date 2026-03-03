@@ -15,8 +15,8 @@ export default async function asyncLoader(content, map, meta) {
 
     const processedContent = await processContent(content, exportName, importFilepath, context, loader, mustFindImport);
 
-    console.log('In inner splitter loader, exporting ' + exportName + ' from ' + importFilepath + ' with context ' + context);
-    console.log(processedContent);
+    // console.log('In inner splitter loader, exporting ' + exportName + ' from ' + importFilepath + ' with context ' + context);
+    // console.log(processedContent);
 
     return processedContent;
 }

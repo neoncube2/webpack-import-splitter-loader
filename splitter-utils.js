@@ -176,8 +176,7 @@ async function getNewImportDeclarations(importDeclaration, importPath, context, 
 }
 
 export async function isESMModule(importPath, loader) {
-    // TODO: Hardcoded
-    if (importPath[0] === '.' || importPath.startsWith('C:')/* || importPath.startsWith('/')*/)
+    if (path.isAbsolute(importPath) || importPath[0] === '.')
         return true;
 
     try {

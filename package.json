@@ -1,6 +1,6 @@
 {
 	"name": "webpack-import-splitter-loader",
-	"version": "1.0.2",
+	"version": "1.0.4",
 	"license": "MIT",
 	"type": "module",
 	"sideEffects": false,

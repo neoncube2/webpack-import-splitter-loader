@@ -510,8 +510,16 @@ export async function processContent(content, exportName, importFilepath, contex
 
                 case 'ImportDeclaration':
                     // TODO: Might be possible to use the sideEffects flag instead?
-                    if (statement.specifiers.length === 0)
-                        statementsWithSideEffects.push(statement);
+                    if (statement.specifiers.length === 0) {
+                        const newImportDeclaration = {
+                            ...statement,
+                            source: {
+                                raw: JSON.stringify(await makeImportSource(statement.source.value, 'original-statements-with-side-effects', context, loader))
+                            }
+                        };
+
+                        statementsWithSideEffects.push(newImportDeclaration);
+                    }
                     else
                         originalImports = originalImports.concat(await getNewImportDeclarations(statement, statement.source.value, context, loader));
                     break;

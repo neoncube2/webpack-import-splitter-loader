@@ -102,7 +102,7 @@ async function makeImportSource(importPath, functionName, context, loader, mustF
     const extensionName = path.extname(importFilepath);
 
     // TODO: Hardcoded. Should be able to remove after https://github.com/webpack/webpack/issues/20421 is implemented
-    if (!/\.(js|jsx|mjs)$/.test(extensionName))
+    if (!/\.(js|jsx|mjs|vue)$/.test(extensionName))
         return importFilepath;
 
     const virtualModulePlugin = getVirtualModulePlugin(loader);

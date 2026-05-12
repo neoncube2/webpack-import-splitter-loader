@@ -5,6 +5,7 @@ import webpack from 'webpack';
 import { Parser, Node } from 'acorn';
 import { generate } from 'astring';
 import md5 from 'md5';
+import isFileEsm from 'is-file-esm';
 
 function shouldExport(identifier, exportName) {
     return identifier === exportName || exportName === '*';
@@ -45,15 +46,21 @@ function generateCode(contents) {
     return generate(contents);
 }
 
-export async function getNormalizedImportFilepath(importFilepath, context, loader) {
+export async function getAbsoluteImportFilepath(importFilepath, loader, context) {
     const resolve = loader.getResolve({
         dependencyType: 'esm'
     });
 
+    return (await resolve(context, importFilepath)).replaceAll('\\', '/');
+}
+
+export async function getNormalizedImportFilepath(importFilepath, loader) {
     try {
-        return (await resolve(context, importFilepath)).replaceAll('\\', '/');
+        const context = loader._module.context;
+
+        return await getAbsoluteImportFilepath(importFilepath, loader, context);
     } catch (e) {
-        console.error('Error while getting normalized import filepath for ' + importFilepath);
+        console.error('Error while getting normalized import filepath for "' + importFilepath + '"');
         console.error(e);
 
         return importFilepath;
@@ -93,27 +100,30 @@ function getVirtualModulePlugin(loader) {
     // return newVirtualModulePlugin;
 }
 
-async function makeImportSource(importPath, functionName, context, loader, mustFindImport = true) {
-    if (!await isESMModule(importPath, loader))
+async function makeImportSource(importPath, functionName, loader, mustFindImport = true) {
+    const context = loader._module.context;
+
+    const absoluteImportFilepath = await getAbsoluteImportFilepath(importPath, loader, context);
+
+    const extensionName = path.extname(absoluteImportFilepath);
+
+    // TODO: Hardcoded
+    if (!/\.(js|jsx|mjs)$/.test(extensionName))
         return importPath;
 
-    const importFilepath = await getNormalizedImportFilepath(importPath, context, loader);
-
-    const extensionName = path.extname(importFilepath);
-
-    // TODO: Hardcoded. Should be able to remove after https://github.com/webpack/webpack/issues/20421 is implemented
-    if (!/\.(js|jsx|mjs|vue)$/.test(extensionName))
-        return importFilepath;
+    if (!await isESMModule(importPath, loader))
+        return importPath;
 
     const virtualModulePlugin = getVirtualModulePlugin(loader);
 
     // We add the MD5 hash after the function name to avoid the Webpack warning "There are multiple modules with names that only differ in casing."
     // Since we're using virtual modules, this warning doesn't apply to us, and this warning shows up often, because minified modules often
     // export single-letter variables that differ only in case (e.g. "H" and "h")
-    const virtualModuleName = 'webpack-import-splitter-loader:' + functionName + '--' + md5(functionName) + importFilepath;
+    // TODO: Used to be path.basename(importFilepath)
+    const virtualModuleName = 'webpack-import-splitter-loader:' + path.dirname(absoluteImportFilepath) + '/' + path.basename(absoluteImportFilepath, extensionName) + '--' + functionName + '--' + md5(functionName) + extensionName;
 
     if (virtualModulePlugin.modules[virtualModuleName] == null) {
-        const readFileContentsTask = readFile(importFilepath/*, 'utf8'*/);
+        const readFileContentsTask = readFile(absoluteImportFilepath/*, 'utf8'*/);
         virtualModulePlugin.modules[virtualModuleName] = {
             type: extensionName,
             source: async (loaderContext) => await readFileContentsTask
@@ -122,8 +132,7 @@ async function makeImportSource(importPath, functionName, context, loader, mustF
 
     const loaderOptions = JSON.stringify({
         exportName: functionName,
-        importFilepath: importFilepath,
-        context: path.dirname(importFilepath),
+        importFilepath: absoluteImportFilepath,
         mustFindImport: mustFindImport
     });
 
@@ -153,7 +162,7 @@ function getImportName(importSpecifier) {
     throw `Unexpected import specifier type "${importSpecifier.type}"`;
 }
 
-async function getNewImportDeclarations(importDeclaration, importPath, context, loader) {
+async function getNewImportDeclarations(importDeclaration, importPath, loader) {
     const newImportDeclarations = [];
 
     for (let specifier of importDeclaration.specifiers) {
@@ -167,7 +176,7 @@ async function getNewImportDeclarations(importDeclaration, importPath, context, 
             specifiers: [specifier],
             source: {
                 ...importDeclaration.source,
-                raw: JSON.stringify(await makeImportSource(importPath, originalImportFunction, context, loader))
+                raw: JSON.stringify(await makeImportSource(importPath, originalImportFunction, loader))
             }
         });
     }
@@ -179,18 +188,9 @@ export async function isESMModule(importPath, loader) {
     if (path.isAbsolute(importPath) || importPath[0] === '.')
         return true;
 
-    try {
-        const moduleResult = await loader.importModule(importPath);
+    const importFilepath = await getNormalizedImportFilepath(importPath, loader);
 
-        return moduleResult.toString() === '[object Module]' || moduleResult.toString() === '[object NormalModule]';
-
-        // return (moduleResult instanceof webpack.Module || moduleResult instanceof webpack.NormalModule);
-    } catch (e) {
-        // console.error(`Error trying to determine whether module "${importPath}" is an ESM module or not`);
-        console.error(e);
-
-        throw `Error trying to determine whether module "${importPath}" is an ESM module or not`;
-    }
+    return await isFileEsm(importFilepath);
 }
 
 function makeImportFromSource(importSource, functionName) {
@@ -215,8 +215,8 @@ function makeImportFromSource(importSource, functionName) {
     };
 }
 
-async function makeImport(importPath, functionName, context, loader) {
-    const importSource = await makeImportSource(importPath, functionName, context, loader);
+async function makeImport(importPath, functionName, loader) {
+    const importSource = await makeImportSource(importPath, functionName, loader);
 
     return makeImportFromSource(importSource, functionName);
 }
@@ -253,7 +253,7 @@ function makeNamedExportStatement(exportName) {
     }
 }
 
-async function handleDeclaration(namedDeclaration, newImports, exportsAndDeclarations, exportName, importPath, context, loader) {
+async function handleDeclaration(namedDeclaration, newImports, exportsAndDeclarations, exportName, importPath, loader) {
     const declarations = getDeclarations(namedDeclaration);
 
     for (let declaration of declarations) {
@@ -279,11 +279,11 @@ async function handleDeclaration(namedDeclaration, newImports, exportsAndDeclara
             continue;
         }
 
-        newImports.push(await makeImport(importPath, declarationName, context, loader));
+        newImports.push(await makeImport(importPath, declarationName, loader));
     }
 }
 
-async function getPossiblyNeededImportStatements(imports, statements, context, loader) {
+async function getPossiblyNeededImportStatements(imports, statements, loader) {
     const allIdentifiers = new Set();
 
     for (let statement of statements) {
@@ -313,9 +313,9 @@ async function getPossiblyNeededImportStatements(imports, statements, context, l
             }
         });
 
-        const splitterLoader = await getSplitterLoader(loader, context);
+        const splitterLoader = await getSplitterLoader(loader);
 
-        const excludedImports = new Set(splitterLoader.options?.exclude ?? []);
+        const excludedImports = new Set(splitterLoader?.options?.exclude ?? []);
 
         for (let importExpression of importExpressions) {
             const source = importExpression.source;
@@ -326,7 +326,7 @@ async function getPossiblyNeededImportStatements(imports, statements, context, l
                 continue;
             }
 
-            source.raw = JSON.stringify(await makeImportSource(source.value, '*', context, loader, false));
+            source.raw = JSON.stringify(await makeImportSource(source.value, '*', loader, false));
         }
     }
 
@@ -353,14 +353,10 @@ async function getPossiblyNeededImportStatements(imports, statements, context, l
 }
 
 function makeNewCode(newBody, parsedImportText) {
-    const newCode = generateCode({
+    return generateCode({
         ...parsedImportText,
         body: newBody
     });
-
-    // console.log(newCode);
-
-    return newCode;
 }
 
 function getDeclarationAndExportStatements(exportName, importFilepath, exportsAndDeclarations, exportAllStatements, mustFindImport) {
@@ -382,15 +378,13 @@ function getDeclarationAndExportStatements(exportName, importFilepath, exportsAn
         .concat(Object.values(exportStatements));
 }
 
-export async function getSplitterLoader(loader, context) {
-    const loaders = loader.loaders;
+export async function getSplitterLoader(loader) {
+    const loaderPath = await getAbsoluteImportFilepath('webpack-import-splitter-loader', loader, loader._module.context);
 
-    const loaderPath = await getNormalizedImportFilepath('webpack-import-splitter-loader', context, loader);
-
-    return loaders.find(loader => loader.path.replaceAll('\\', '/') === loaderPath);
+    return loader.loaders.find(loader => loader.path.replaceAll('\\', '/') === loaderPath);
 }
 
-export async function processContent(content, exportName, importFilepath, context, loader, mustFindImport) {
+export async function processContent(content, exportName, importFilepath, loader, mustFindImport) {
     const parsedImportText = parse(content);
 
     try {
@@ -421,13 +415,13 @@ export async function processContent(content, exportName, importFilepath, contex
 
                 case 'FunctionDeclaration':
                 case 'ClassDeclaration':
-                    await handleDeclaration(statement, newImports, exportsAndDeclarations, exportName, importFilepath, context, loader);
+                    await handleDeclaration(statement, newImports, exportsAndDeclarations, exportName, importFilepath, loader);
                     break;
 
                 case 'VariableDeclaration':
                     switch (statement.kind) {
                         case 'const':
-                            await handleDeclaration(statement, newImports, exportsAndDeclarations, exportName, importFilepath, context, loader);
+                            await handleDeclaration(statement, newImports, exportsAndDeclarations, exportName, importFilepath, loader);
                             break;
 
                         case 'let':
@@ -440,7 +434,7 @@ export async function processContent(content, exportName, importFilepath, contex
                                 if (exportName === 'original-statements-with-side-effects') {
                                     statementsWithSideEffects.push(makeNamedExportStatement(declarationName));
                                 } else {
-                                    newImports.push(makeImportFromSource(await makeImportSource(importFilepath, 'original-statements-with-side-effects', context, loader), declarationName));
+                                    newImports.push(makeImportFromSource(await makeImportSource(importFilepath, 'original-statements-with-side-effects', loader), declarationName));
                                 }
                             }
                         }
@@ -459,7 +453,7 @@ export async function processContent(content, exportName, importFilepath, contex
 
                     if (namedDeclaration != null) {
                         if (namedDeclaration.type === 'VariableDeclaration' || namedDeclaration.type === 'FunctionDeclaration' || namedDeclaration.type === 'ClassDeclaration') {
-                            await handleDeclaration(namedDeclaration, newImports, exportsAndDeclarations, exportName, importFilepath, context, loader);
+                            await handleDeclaration(namedDeclaration, newImports, exportsAndDeclarations, exportName, importFilepath, loader);
 
                             break;
                         }
@@ -498,7 +492,7 @@ export async function processContent(content, exportName, importFilepath, contex
                                 }
 
                                 if (!exportsAndDeclarations.some(exportAndDeclaration => exportAndDeclaration.declaration != null && getDeclarations(exportAndDeclaration.declaration).some(declaration => declaration?.id.name === specifierName)))
-                                    newImports.push(await makeImport(importFilepath, specifierName, context, loader));
+                                    newImports.push(await makeImport(importFilepath, specifierName, loader));
                             }
                         }
 
@@ -514,14 +508,14 @@ export async function processContent(content, exportName, importFilepath, contex
                         const newImportDeclaration = {
                             ...statement,
                             source: {
-                                raw: JSON.stringify(await makeImportSource(statement.source.value, 'original-statements-with-side-effects', context, loader))
+                                raw: JSON.stringify(await makeImportSource(statement.source.value, 'original-statements-with-side-effects', loader))
                             }
                         };
 
                         statementsWithSideEffects.push(newImportDeclaration);
                     }
                     else
-                        originalImports = originalImports.concat(await getNewImportDeclarations(statement, statement.source.value, context, loader));
+                        originalImports = originalImports.concat(await getNewImportDeclarations(statement, statement.source.value, loader));
                     break;
 
                 case 'ExportDefaultDeclaration':
@@ -535,7 +529,7 @@ export async function processContent(content, exportName, importFilepath, contex
                     exportAllStatements.push({
                         ...statement,
                         source: {
-                            raw: JSON.stringify(await makeImportSource(statement.source.value, exportName, context, loader, false))
+                            raw: JSON.stringify(await makeImportSource(statement.source.value, exportName, loader, false))
                         }
                     });
                     break;
@@ -554,14 +548,14 @@ export async function processContent(content, exportName, importFilepath, contex
 
         const imports = [...originalImports, ...newImports];
 
-        const possiblyNeededImportStatements = await getPossiblyNeededImportStatements(imports, statements, context, loader);
+        const possiblyNeededImportStatements = await getPossiblyNeededImportStatements(imports, statements, loader);
 
         let newBody = [
             ...beforeImports
         ];
 
         if (exportName !== 'original-statements-with-side-effects' && statementsWithSideEffects.length > 0) {
-            const newSource = await makeImportSource(importFilepath, 'original-statements-with-side-effects', context, loader);
+            const newSource = await makeImportSource(importFilepath, 'original-statements-with-side-effects', loader);
 
             newBody.push({
                 type: 'ImportDeclaration',

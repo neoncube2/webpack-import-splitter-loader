@@ -12,10 +12,11 @@
 	"dependencies": {
 		"acorn": "^8.16.0",
 		"astring": "^1.9.0",
+		"is-file-esm": "^1.0.0",
 		"md5": "^2.3.0"
 	},
 	"peerDependencies": {
-		"webpack": "^5.105.0"
+		"webpack": "^5.106.2"
 	},
 	"packageManager": "yarn@4.13.0",
 	"bugs": "https://github.com/neoncube2/webpack-import-splitter-loader/issues",
